@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 import {
   getTasks,
@@ -7,6 +7,7 @@ import {
   updateTask,
   deleteTask as deleteTaskAPI,
 } from "./api/taskApi";
+import { getApiErrorMessage } from "./api/apiClient";
 
 import Header from "./Components/Header";
 import Stats from "./Components/Stats";
@@ -26,15 +27,29 @@ import Profile from "./Pages/Profile";
 
 import "./App.css";
 
+function getSavedUser() {
+  const savedUser = localStorage.getItem("user");
+  if (!savedUser) return null;
+
+  try {
+    return JSON.parse(savedUser);
+  } catch {
+    return null;
+  }
+}
+
 function App() {
   // Authentication
-  const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem("user");
-    return savedUser ? JSON.parse(savedUser) : null;
-  });
+  const [user, setUser] = useState(getSavedUser);
 
   const [authPage, setAuthPage] = useState("login");
   const [tasks, setTasks] = useState([]);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(Boolean(user));
+  const [taskLoadError, setTaskLoadError] = useState("");
+  const [taskReloadKey, setTaskReloadKey] = useState(0);
+  const [isSavingTask, setIsSavingTask] = useState(false);
+  const [activeTaskActionId, setActiveTaskActionId] = useState(null);
+  const [feedback, setFeedback] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
 
   // Task form states
@@ -52,6 +67,29 @@ function App() {
     return localStorage.getItem("studybuddy-theme") || "dark";
   });
 
+  const resetForm = useCallback(() => {
+    setTitle("");
+    setSubject("");
+    setDescription("");
+    setCategory("Homework");
+    setDueDate("");
+    setPriority("Medium");
+    setEditingTaskId(null);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+
+    setUser(null);
+    setTasks([]);
+    setIsLoadingTasks(false);
+    setTaskLoadError("");
+    setFeedback(null);
+    setShowProfile(false);
+    resetForm();
+  }, [resetForm]);
+
   // Apply and save selected theme
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -65,47 +103,53 @@ function App() {
     );
   }
 
-  // Fetch tasks only after login
+  const userId = user?.id;
+
+  // Fetch tasks when the authenticated account changes.
   useEffect(() => {
-    if (!user) {
-      setTasks([]);
-      return;
-    }
+    if (!userId) return undefined;
 
     async function fetchTasks() {
       try {
-        const response = await getTasks();
-        setTasks(response.data.tasks || []);
+        const response = await getTasks({ signal: controller.signal });
+        setTasks(Array.isArray(response.data.tasks) ? response.data.tasks : []);
+        setTaskLoadError("");
       } catch (error) {
-        console.log("Error fetching tasks:", error);
-
-        if (error.response?.status === 401) {
-          handleLogout();
+        if (error.code !== "ERR_CANCELED" && error.response?.status !== 401) {
+          const message = getApiErrorMessage(error, "Unable to load your tasks.");
+          setTaskLoadError(message);
+          setFeedback({
+            type: "error",
+            message,
+          });
         }
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingTasks(false);
       }
     }
 
+    const controller = new AbortController();
     fetchTasks();
-  }, [user]);
+    return () => controller.abort();
+  }, [taskReloadKey, userId]);
+
+  useEffect(() => {
+    window.addEventListener("studybuddy:unauthorized", handleLogout);
+    return () =>
+      window.removeEventListener("studybuddy:unauthorized", handleLogout);
+  }, [handleLogout]);
 
   // Login success
   function handleLogin(loggedInUser) {
+    setTasks([]);
+    setIsLoadingTasks(true);
+    setTaskLoadError("");
+    setFeedback(null);
     setUser(loggedInUser);
     setAuthPage("login");
   }
 
   // Logout
-  function handleLogout() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-
-    setUser(null);
-    setTasks([]);
-    setShowProfile(false);
-
-    resetForm();
-  }
-
   // Update profile information
   function handleProfileUpdate(updatedUser) {
     setUser(updatedUser);
@@ -115,9 +159,10 @@ function App() {
   // Create or update task
   async function handleSubmit(e) {
     e.preventDefault();
+    if (isSavingTask) return;
 
     if (!title.trim() || !subject.trim() || !dueDate) {
-      alert("Please fill in all required fields");
+      setFeedback({ type: "error", message: "Please fill in all required fields." });
       return;
     }
 
@@ -131,6 +176,9 @@ function App() {
     };
 
     try {
+      setIsSavingTask(true);
+      setFeedback(null);
+
       if (editingTaskId) {
         const response = await updateTask(editingTaskId, taskData);
 
@@ -142,7 +190,7 @@ function App() {
           )
         );
 
-        alert("Task updated successfully!");
+        setFeedback({ type: "success", message: "Task updated successfully." });
       } else {
         const response = await createTask({
           ...taskData,
@@ -154,30 +202,22 @@ function App() {
           ...previousTasks,
         ]);
 
-        alert("Task added successfully!");
+        setFeedback({ type: "success", message: "Task added successfully." });
       }
 
       resetForm();
     } catch (error) {
-      console.log("Error saving task:", error);
-
       if (error.response?.status === 401) {
-        handleLogout();
+        return;
       } else {
-        alert("Unable to save task");
+        setFeedback({
+          type: "error",
+          message: getApiErrorMessage(error, "Unable to save your task."),
+        });
       }
+    } finally {
+      setIsSavingTask(false);
     }
-  }
-
-  // Clear form
-  function resetForm() {
-    setTitle("");
-    setSubject("");
-    setDescription("");
-    setCategory("Homework");
-    setDueDate("");
-    setPriority("Medium");
-    setEditingTaskId(null);
   }
 
   // Edit task
@@ -193,6 +233,8 @@ function App() {
 
   // Mark completed or pending
   async function toggleComplete(id) {
+    if (activeTaskActionId) return;
+
     try {
       const currentTask = tasks.find(
         (task) => task._id === id
@@ -200,6 +242,8 @@ function App() {
 
       if (!currentTask) return;
 
+      setActiveTaskActionId(id);
+      setFeedback(null);
       const response = await updateTask(id, {
         completed: !currentTask.completed,
       });
@@ -209,20 +253,33 @@ function App() {
           task._id === id ? response.data.task : task
         )
       );
+      setFeedback({
+        type: "success",
+        message: currentTask.completed
+          ? "Task marked as pending."
+          : "Task marked as completed.",
+      });
     } catch (error) {
-      console.log("Error updating task:", error);
-
       if (error.response?.status === 401) {
-        handleLogout();
+        return;
       } else {
-        alert("Unable to update task");
+        setFeedback({
+          type: "error",
+          message: getApiErrorMessage(error, "Unable to update the task."),
+        });
       }
+    } finally {
+      setActiveTaskActionId(null);
     }
   }
 
   // Delete task
   async function deleteTask(id) {
+    if (activeTaskActionId) return;
+
     try {
+      setActiveTaskActionId(id);
+      setFeedback(null);
       await deleteTaskAPI(id);
 
       setTasks((previousTasks) =>
@@ -232,15 +289,35 @@ function App() {
       if (editingTaskId === id) {
         resetForm();
       }
+      setFeedback({ type: "success", message: "Task deleted successfully." });
     } catch (error) {
-      console.log("Error deleting task:", error);
-
       if (error.response?.status === 401) {
-        handleLogout();
+        return;
       } else {
-        alert("Unable to delete task");
+        setFeedback({
+          type: "error",
+          message: getApiErrorMessage(error, "Unable to delete the task."),
+        });
       }
+    } finally {
+      setActiveTaskActionId(null);
     }
+  }
+
+  function handleExportTasks() {
+    const exported = exportTasks(tasks);
+    setFeedback(
+      exported
+        ? { type: "success", message: "Your assignments were exported." }
+        : { type: "error", message: "There are no assignments to export yet." }
+    );
+  }
+
+  function retryTaskLoad() {
+    setTaskLoadError("");
+    setIsLoadingTasks(true);
+    setFeedback(null);
+    setTaskReloadKey((currentKey) => currentKey + 1);
   }
 
   // Show Login / Register when user is not logged in
@@ -248,6 +325,8 @@ function App() {
     if (window.location.pathname.startsWith("/reset-password")) {
       return (
         <ResetPassword
+          theme={theme}
+          toggleTheme={toggleTheme}
           onShowLogin={() => {
             window.location.href = "/";
           }}
@@ -258,6 +337,8 @@ function App() {
     if (authPage === "register") {
       return (
         <Register
+          theme={theme}
+          toggleTheme={toggleTheme}
           onShowLogin={() => setAuthPage("login")}
         />
       );
@@ -266,6 +347,8 @@ function App() {
     if (authPage === "forgot") {
       return (
         <ForgotPassword
+          theme={theme}
+          toggleTheme={toggleTheme}
           onShowLogin={() => setAuthPage("login")}
         />
       );
@@ -273,6 +356,8 @@ function App() {
 
     return (
       <Login
+        theme={theme}
+        toggleTheme={toggleTheme}
         onLogin={handleLogin}
         onShowRegister={() => setAuthPage("register")}
         onShowForgotPassword={() => setAuthPage("forgot")}
@@ -323,6 +408,17 @@ function App() {
           Organize your assignments and stay on track.
         </p>
 
+        {feedback && (
+          <div
+            className={feedback.type === "error" ? "profile-error" : "profile-success"}
+            role={feedback.type === "error" ? "alert" : "status"}
+          >
+            {feedback.message}
+          </div>
+        )}
+
+        {isLoadingTasks && <p role="status">Loading your tasks...</p>}
+
         <div id="overview">
           <Stats tasks={tasks} />
         </div>
@@ -333,7 +429,7 @@ function App() {
           <button
             type="button"
             className="export-button"
-            onClick={() => exportTasks(tasks)}
+            onClick={handleExportTasks}
           >
             📥 Export Assignments
           </button>
@@ -366,6 +462,7 @@ function App() {
             handleSubmit={handleSubmit}
             editingTaskId={editingTaskId}
             resetForm={resetForm}
+            isSaving={isSavingTask}
           />
         </div>
 
@@ -375,6 +472,10 @@ function App() {
             toggleComplete={toggleComplete}
             deleteTask={deleteTask}
             editTask={editTask}
+            isLoading={isLoadingTasks}
+            loadError={taskLoadError}
+            onRetryLoad={retryTaskLoad}
+            activeTaskActionId={activeTaskActionId}
           />
         </div>
       </main>

@@ -62,7 +62,11 @@ function CalendarView({ tasks }) {
 
       {/* Calendar Header */}
       <div className="calendar-header">
-        <button type="button" onClick={previousMonth}>
+        <button
+          type="button"
+          onClick={previousMonth}
+          aria-label="Previous month"
+        >
           ←
         </button>
 
@@ -73,7 +77,7 @@ function CalendarView({ tasks }) {
           })}
         </h3>
 
-        <button type="button" onClick={nextMonth}>
+        <button type="button" onClick={nextMonth} aria-label="Next month">
           →
         </button>
       </div>

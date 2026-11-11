@@ -3,33 +3,55 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import rateLimit from "express-rate-limit";
 import User from "../models/User.js";
 import authMiddleware from "../middleware/authMiddleware.js";
+import {
+  isRequestBody,
+  isValidEmail,
+  isValidPassword,
+  normalizeEmail,
+} from "../utils/validation.js";
+import sendApiError from "../utils/sendApiError.js";
 const router = express.Router();
 
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many authentication attempts. Try again later." },
+});
+
 // REGISTER
-router.post("/register", async (req, res) => {
+router.post("/register", authLimiter, async (req, res) => {
   try {
+    if (!isRequestBody(req.body)) {
+      return res.status(400).json({ message: "Please provide valid request data" });
+    }
+
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
+    if (typeof name !== "string" || !name.trim() || !isValidEmail(email)) {
       return res.status(400).json({
-        message: "Please fill all fields",
+        message: "Please provide a valid name and email address",
       });
     }
 
-    if (password.length < 6) {
+    if (!isValidPassword(password)) {
       return res.status(400).json({
-        message: "Password must be at least 6 characters",
+        message: "Password must be at least 6 characters and no more than 72 bytes",
       });
     }
 
-    const existingUser = await User.findOne({
-      email: email.toLowerCase().trim(),
-    });
+    if (name.trim().length > 80) {
+      return res.status(400).json({ message: "Name must be 80 characters or fewer" });
+    }
 
+    const normalizedEmail = normalizeEmail(email);
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
-      return res.status(400).json({
+      return res.status(409).json({
         message: "Email already registered",
       });
     }
@@ -37,12 +59,12 @@ router.post("/register", async (req, res) => {
     const hashPassword = await bcrypt.hash(password, 10);
 
     const newUser = await User.create({
-      name,
-      email: email.toLowerCase().trim(),
+      name: name.trim(),
+      email: normalizedEmail,
       password: hashPassword,
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       message: "Registration successfully",
       user: {
         id: newUser._id,
@@ -51,28 +73,26 @@ router.post("/register", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Registration error:", error);
-
-    res.status(500).json({
-      message: "Server error during registration",
-    });
+    return sendApiError(res, error, "Registration");
   }
 });
 
 // LOGIN
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, async (req, res) => {
   try {
+    if (!isRequestBody(req.body)) {
+      return res.status(400).json({ message: "Please provide valid request data" });
+    }
+
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (!isValidEmail(email) || typeof password !== "string" || !password) {
       return res.status(400).json({
-        message: "Please enter email and password",
+        message: "Please enter a valid email address and password",
       });
     }
 
-    const user = await User.findOne({
-      email: email.toLowerCase().trim(),
-    });
+    const user = await User.findOne({ email: normalizeEmail(email) });
 
     if (!user) {
       return res.status(401).json({
@@ -91,10 +111,15 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    if (!process.env.JWT_SECRET) {
+      console.error("Login failed (JWT_SECRET is not configured)");
+      return res.status(503).json({ message: "Authentication is temporarily unavailable" });
+    }
+
     const token = jwt.sign(
       { userId: user._id },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d", algorithm: "HS256" }
     );
 
     res.status(200).json({
@@ -107,32 +132,34 @@ router.post("/login", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Login error:", error);
-
-    res.status(500).json({
-      message: "Server error during login",
-    });
+    return sendApiError(res, error, "Login");
   }
 });
 
 // FORGOT PASSWORD
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", authLimiter, async (req, res) => {
   try {
+    if (!isRequestBody(req.body)) {
+      return res.status(400).json({ message: "Please provide valid request data" });
+    }
+
     const { email } = req.body;
 
-    if (!email) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({
-        message: "Please enter your email",
+        message: "Please enter a valid email address",
       });
     }
 
-    const user = await User.findOne({
-      email: email.toLowerCase().trim(),
-    });
+    const user = await User.findOne({ email: normalizeEmail(email) });
 
-    if (!user) {
+    const genericResponse = {
+      message: "If the account exists, password reset instructions will be sent.",
+    };
+
+    if (!user || process.env.NODE_ENV === "production") {
       return res.status(200).json({
-        message: "If the account exists, a reset link has been generated.",
+        ...genericResponse,
       });
     }
 
@@ -150,36 +177,34 @@ router.post("/forgot-password", async (req, res) => {
 
     await user.save();
 
-    // Development-only reset link for testing
-    const resetLink = `http://localhost:5173/reset-password/${resetToken}`;
+    const response = { ...genericResponse };
 
-    res.status(200).json({
-      message: "Password reset link generated successfully.",
-      resetLink,
-    });
+    const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:5173")
+      .replace(/\/+$/, "");
+    response.resetLink = `${frontendUrl}/reset-password/${resetToken}`;
+
+    return res.status(200).json(response);
   } catch (error) {
-    console.error("Forgot password error:", error);
-
-    res.status(500).json({
-      message: "Unable to process password reset request",
-    });
+    return sendApiError(res, error, "Forgot password");
   }
 });
 
 // RESET PASSWORD
-router.post("/reset-password", async (req, res) => {
+router.post("/reset-password", authLimiter, async (req, res) => {
   try {
-    const { token, password } = req.body;
-
-    if (!token || !password) {
-      return res.status(400).json({
-        message: "Token and new password are required",
-      });
+    if (!isRequestBody(req.body)) {
+      return res.status(400).json({ message: "Please provide valid request data" });
     }
 
-    if (password.length < 6) {
+    const { token, password } = req.body;
+
+    if (
+      typeof token !== "string" ||
+      !/^[a-f\d]{64}$/i.test(token) ||
+      !isValidPassword(password)
+    ) {
       return res.status(400).json({
-        message: "Password must be at least 6 characters",
+        message: "A valid reset token and password are required",
       });
     }
 
@@ -210,15 +235,11 @@ router.post("/reset-password", async (req, res) => {
 
     await user.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Password reset successfully. Please login.",
     });
   } catch (error) {
-    console.error("Reset password error:", error);
-
-    res.status(500).json({
-      message: "Unable to reset password",
-    });
+    return sendApiError(res, error, "Reset password");
   }
 });
 
@@ -243,17 +264,49 @@ router.get("/profile", authMiddleware, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get profile error:", error);
-    res.status(500).json({
-      message: "Unable to fetch profile",
-    });
+    return sendApiError(res, error, "Get profile");
   }
 });
 
 // UPDATE USER PROFILE
 router.put("/profile", authMiddleware, async (req, res) => {
   try {
+    if (!isRequestBody(req.body)) {
+      return res.status(400).json({ message: "Please provide valid request data" });
+    }
+
+    const allowedFields = new Set(["name", "currentPassword", "newPassword"]);
+    if (Object.keys(req.body).some((field) => !allowedFields.has(field))) {
+      return res.status(400).json({ message: "Request contains unsupported fields" });
+    }
+
     const { name, currentPassword, newPassword } = req.body;
+    const hasName = Object.hasOwn(req.body, "name");
+    const hasCurrentPassword = Object.hasOwn(req.body, "currentPassword");
+    const hasNewPassword = Object.hasOwn(req.body, "newPassword");
+
+    if (!hasName && !hasCurrentPassword && !hasNewPassword) {
+      return res.status(400).json({ message: "Provide at least one profile change" });
+    }
+
+    if (
+      hasName &&
+      (typeof name !== "string" || !name.trim() || name.trim().length > 80)
+    ) {
+      return res.status(400).json({
+        message: "Name must be between 1 and 80 characters",
+      });
+    }
+
+    if (
+      hasCurrentPassword !== hasNewPassword ||
+      (hasCurrentPassword && typeof currentPassword !== "string") ||
+      (hasNewPassword && !isValidPassword(newPassword))
+    ) {
+      return res.status(400).json({
+        message: "To change your password, provide your current password and a valid new password",
+      });
+    }
 
     const user = await User.findById(req.userId);
 
@@ -264,30 +317,12 @@ router.put("/profile", authMiddleware, async (req, res) => {
     }
 
     // Update name
-    if (name !== undefined) {
-      if (!name.trim()) {
-        return res.status(400).json({
-          message: "Name cannot be empty",
-        });
-      }
-
+    if (hasName) {
       user.name = name.trim();
     }
 
     // Change password
-    if (newPassword) {
-      if (!currentPassword) {
-        return res.status(400).json({
-          message: "Please enter your current password",
-        });
-      }
-
-      if (newPassword.length < 6) {
-        return res.status(400).json({
-          message: "New password must be at least 6 characters",
-        });
-      }
-
+    if (hasNewPassword) {
       const isPasswordCorrect = await bcrypt.compare(
         currentPassword,
         user.password
@@ -304,7 +339,7 @@ router.put("/profile", authMiddleware, async (req, res) => {
 
     await user.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Profile updated successfully",
       user: {
         id: user._id,
@@ -313,10 +348,7 @@ router.put("/profile", authMiddleware, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Update profile error:", error);
-    res.status(500).json({
-      message: "Unable to update profile",
-    });
+    return sendApiError(res, error, "Update profile");
   }
 });
 

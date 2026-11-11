@@ -1,8 +1,7 @@
 
 function exportTasks(tasks) {
   if (tasks.length === 0) {
-    alert("No assignments available to export!");
-    return;
+    return false;
   }
 
   const headers = [
@@ -46,7 +45,8 @@ function exportTasks(tasks) {
   link.click();
   document.body.removeChild(link);
 
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
 }
 
 export default exportTasks;

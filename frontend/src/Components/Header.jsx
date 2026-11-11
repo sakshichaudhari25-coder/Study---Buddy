@@ -65,10 +65,7 @@ function Header({ theme, toggleTheme, onProfileClick }) {
         <button
           type="button"
           className="profile-nav-button"
-          onClick={() => {
-            console.log("Profile button clicked");
-            onProfileClick();
-          }}
+          onClick={onProfileClick}
         >
           👤 Profile
         </button>

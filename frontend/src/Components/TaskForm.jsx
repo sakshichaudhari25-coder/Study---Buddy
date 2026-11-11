@@ -14,6 +14,7 @@ function TaskForm({
   handleSubmit,
   editingTaskId,
   resetForm,
+  isSaving,
 }) {
   return (
     <section className="task-section">
@@ -23,6 +24,8 @@ function TaskForm({
         {/* Assignment Title */}
         <input
           type="text"
+          aria-label="Assignment title"
+          maxLength={160}
           placeholder="Assignment title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -32,6 +35,8 @@ function TaskForm({
         {/* Subject */}
         <input
           type="text"
+          aria-label="Subject"
+          maxLength={120}
           placeholder="Subject"
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
@@ -40,6 +45,8 @@ function TaskForm({
 
         {/* Description */}
         <textarea
+          aria-label="Assignment description"
+          maxLength={2000}
           placeholder="Assignment description or instructions..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -48,6 +55,7 @@ function TaskForm({
 
         {/* Assignment Category */}
         <select
+          aria-label="Assignment category"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           required
@@ -62,6 +70,7 @@ function TaskForm({
         {/* Due Date */}
         <input
           type="date"
+          aria-label="Due date"
           value={dueDate}
           onChange={(e) => setDueDate(e.target.value)}
           required
@@ -69,6 +78,7 @@ function TaskForm({
 
         {/* Priority */}
         <select
+          aria-label="Priority"
           value={priority}
           onChange={(e) => setPriority(e.target.value)}
         >
@@ -78,13 +88,17 @@ function TaskForm({
         </select>
 
         {/* Submit */}
-        <button type="submit">
-          {editingTaskId ? "Save Changes" : "Add Task"}
+        <button type="submit" disabled={isSaving}>
+          {isSaving
+            ? "Saving..."
+            : editingTaskId
+              ? "Save Changes"
+              : "Add Task"}
         </button>
 
         {/* Cancel */}
         {editingTaskId && (
-          <button type="button" onClick={resetForm}>
+          <button type="button" onClick={resetForm} disabled={isSaving}>
             Cancel
           </button>
         )}

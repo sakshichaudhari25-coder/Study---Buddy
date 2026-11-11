@@ -1,23 +1,16 @@
-import axios from "axios"
+import apiClient from "./apiClient";
 
-const API= axios.create({
-  baseURL:"http://localhost:5000/api/tasks",
-})
+export const getTasks = (config = {}) =>
+  apiClient.get("/tasks", { ...config, requiresAuth: true });
 
-API.interceptors.request.use((config)=>{
-  const token = localStorage.getItem("token");
+export const createTask = (taskData, config = {}) =>
+  apiClient.post("/tasks", taskData, { ...config, requiresAuth: true });
 
-  if(token){
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-})
+export const updateTask = (id, taskData, config = {}) =>
+  apiClient.put(`/tasks/${id}`, taskData, {
+    ...config,
+    requiresAuth: true,
+  });
 
-export const getTasks=()=>API.get("/");
-
-export const createTask = (taskData)=>API.post("/",taskData);
-
-export const updateTask = (id, taskData)=>
-  API.put(`/${id}`,taskData)
-
-export const deleteTask = (id) => API.delete(`/${id}`)
+export const deleteTask = (id, config = {}) =>
+  apiClient.delete(`/tasks/${id}`, { ...config, requiresAuth: true });

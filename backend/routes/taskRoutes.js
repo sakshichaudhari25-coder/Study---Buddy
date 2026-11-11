@@ -3,8 +3,107 @@ import express from "express";
 import mongoose from "mongoose";
 import Task from "../models/Task.js";
 import authMiddleware from "../middleware/authMiddleware.js";
+import { isRequestBody, isValidDueDate } from "../utils/validation.js";
+import sendApiError from "../utils/sendApiError.js";
 
 const router = express.Router();
+
+const categories = new Set([
+  "Homework",
+  "Project",
+  "Exam",
+  "Practical",
+  "Presentation",
+]);
+const priorities = new Set(["Low", "Medium", "High"]);
+const taskFields = new Set([
+  "title",
+  "subject",
+  "description",
+  "category",
+  "dueDate",
+  "priority",
+  "completed",
+]);
+
+function validateTaskInput(body, partial = false) {
+  if (!isRequestBody(body)) return { error: "Please provide valid task data" };
+
+  const fields = Object.keys(body);
+  if (fields.some((field) => !taskFields.has(field))) {
+    return { error: "Request contains unsupported task fields" };
+  }
+
+  if (partial && fields.length === 0) {
+    return { error: "Provide at least one task field to update" };
+  }
+
+  if (
+    !partial &&
+    (!Object.hasOwn(body, "title") ||
+      !Object.hasOwn(body, "subject") ||
+      !Object.hasOwn(body, "dueDate"))
+  ) {
+    return { error: "Title, subject, and due date are required" };
+  }
+
+  const normalized = {};
+
+  if (Object.hasOwn(body, "title")) {
+    if (typeof body.title !== "string" || !body.title.trim() || body.title.trim().length > 160) {
+      return { error: "Title must be between 1 and 160 characters" };
+    }
+    normalized.title = body.title.trim();
+  }
+
+  if (Object.hasOwn(body, "subject")) {
+    if (
+      typeof body.subject !== "string" ||
+      !body.subject.trim() ||
+      body.subject.trim().length > 120
+    ) {
+      return { error: "Subject must be between 1 and 120 characters" };
+    }
+    normalized.subject = body.subject.trim();
+  }
+
+  if (Object.hasOwn(body, "description")) {
+    if (typeof body.description !== "string" || body.description.length > 2000) {
+      return { error: "Description must be 2000 characters or fewer" };
+    }
+    normalized.description = body.description.trim();
+  }
+
+  if (Object.hasOwn(body, "category")) {
+    if (typeof body.category !== "string" || !categories.has(body.category)) {
+      return { error: "Please choose a valid task category" };
+    }
+    normalized.category = body.category;
+  }
+
+  if (Object.hasOwn(body, "dueDate")) {
+    if (!isValidDueDate(body.dueDate)) {
+      return { error: "Please provide a valid due date" };
+    }
+    normalized.dueDate = body.dueDate;
+  }
+
+  if (Object.hasOwn(body, "priority")) {
+    if (typeof body.priority !== "string" || !priorities.has(body.priority)) {
+      return { error: "Please choose a valid task priority" };
+    }
+    normalized.priority = body.priority;
+  }
+
+  if (Object.hasOwn(body, "completed")) {
+    if (typeof body.completed !== "boolean") {
+      return { error: "Task completion status must be true or false" };
+    }
+    normalized.completed = body.completed;
+  }
+
+  return { data: normalized };
+}
 
 // Protect all task routes
 router.use(authMiddleware);
@@ -12,30 +111,13 @@ router.use(authMiddleware);
 // CREATE a new task
 router.post("/", async (req, res) => {
   try {
-    const {
-      title,
-      subject,
-      description,
-      category,
-      dueDate,
-      priority,
-      completed,
-    } = req.body;
-
-    if (!title?.trim() || !subject?.trim() || !dueDate) {
-      return res.status(400).json({
-        message: "Please fill in all required fields",
-      });
+    const validation = validateTaskInput(req.body);
+    if (validation.error) {
+      return res.status(400).json({ message: validation.error });
     }
 
     const newTask = await Task.create({
-      title,
-      subject,
-      description: description || "",
-      category,
-      dueDate,
-      priority,
-      completed,
+      ...validation.data,
       owner: req.userId,
     });
 
@@ -44,12 +126,7 @@ router.post("/", async (req, res) => {
       task: newTask,
     });
   } catch (error) {
-    console.log("Create Task Error:", error);
-
-    return res.status(500).json({
-      message: "Failed to create task",
-      error: error.message,
-    });
+    return sendApiError(res, error, "Create task");
   }
 });
 
@@ -67,12 +144,7 @@ router.get("/", async (req, res) => {
       tasks,
     });
   } catch (error) {
-    console.log("Fetch Tasks Error:", error);
-
-    return res.status(500).json({
-      message: "Failed to fetch tasks",
-      error: error.message,
-    });
+    return sendApiError(res, error, "Fetch tasks");
   }
 });
 
@@ -101,12 +173,7 @@ router.get("/:id", async (req, res) => {
       task,
     });
   } catch (error) {
-    console.log("Fetch Single Task Error:", error);
-
-    return res.status(500).json({
-      message: "Failed to fetch task",
-      error: error.message,
-    });
+    return sendApiError(res, error, "Fetch task");
   }
 });
 
@@ -119,30 +186,17 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    const allowedFields = [
-      "title",
-      "subject",
-      "description",
-      "category",
-      "dueDate",
-      "priority",
-      "completed",
-    ];
-
-    const updates = {};
-
-    allowedFields.forEach((field) => {
-      if (req.body[field] !== undefined) {
-        updates[field] = req.body[field];
-      }
-    });
+    const validation = validateTaskInput(req.body, true);
+    if (validation.error) {
+      return res.status(400).json({ message: validation.error });
+    }
 
     const updatedTask = await Task.findOneAndUpdate(
       {
         _id: req.params.id,
         owner: req.userId,
       },
-      updates,
+      validation.data,
       {
         returnDocument: "after",
         runValidators: true,
@@ -160,12 +214,7 @@ router.put("/:id", async (req, res) => {
       task: updatedTask,
     });
   } catch (error) {
-    console.log("Update Task Error:", error);
-
-    return res.status(500).json({
-      message: "Failed to update task",
-      error: error.message,
-    });
+    return sendApiError(res, error, "Update task");
   }
 });
 
@@ -194,12 +243,7 @@ router.delete("/:id", async (req, res) => {
       task: deletedTask,
     });
   } catch (error) {
-    console.log("Delete Task Error:", error);
-
-    return res.status(500).json({
-      message: "Failed to delete task",
-      error: error.message,
-    });
+    return sendApiError(res, error, "Delete task");
   }
 });
 

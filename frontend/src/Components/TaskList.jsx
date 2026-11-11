@@ -1,7 +1,16 @@
 
 import { useState } from "react";
 
-function TaskList({ tasks, toggleComplete, deleteTask, editTask }) {
+function TaskList({
+  tasks,
+  toggleComplete,
+  deleteTask,
+  editTask,
+  isLoading,
+  loadError,
+  onRetryLoad,
+  activeTaskActionId,
+}) {
   const [filter, setFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All Categories");
   const [search, setSearch] = useState("");
@@ -78,6 +87,7 @@ function TaskList({ tasks, toggleComplete, deleteTask, editTask }) {
 
       <input
         type="text"
+        aria-label="Search assignments"
         placeholder="Search by task title, subject or description..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
@@ -90,6 +100,7 @@ function TaskList({ tasks, toggleComplete, deleteTask, editTask }) {
               type="button"
               key={item}
               className={filter === item ? "active-filter" : ""}
+              aria-pressed={filter === item}
               onClick={() => setFilter(item)}
             >
               {item}
@@ -133,7 +144,16 @@ function TaskList({ tasks, toggleComplete, deleteTask, editTask }) {
       </div>
 
       {/* Task List */}
-      {tasks.length === 0 ? (
+      {isLoading ? (
+        <p role="status">Loading your assignments...</p>
+      ) : loadError ? (
+        <div role="alert">
+          <p>Assignments could not be loaded.</p>
+          <button type="button" onClick={onRetryLoad}>
+            Try Again
+          </button>
+        </div>
+      ) : tasks.length === 0 ? (
         <p>No tasks available. Add your first task!</p>
       ) : sortedTasks.length === 0 ? (
         <p>No matching tasks found.</p>
@@ -212,18 +232,24 @@ function TaskList({ tasks, toggleComplete, deleteTask, editTask }) {
 
               <button
                 type="button"
+                disabled={Boolean(activeTaskActionId)}
                 onClick={() => toggleComplete(task._id)}
               >
                 {task.completed ? "Mark Pending" : "Mark Completed"}
               </button>
 
-              <button type="button" onClick={() => editTask(task)}>
+              <button
+                type="button"
+                disabled={Boolean(activeTaskActionId)}
+                onClick={() => editTask(task)}
+              >
                 Edit
               </button>
 
               <button
                 type="button"
                 className="delete-btn"
+                disabled={Boolean(activeTaskActionId)}
                 onClick={() => {
                   const confirmDelete = window.confirm(
                     "Are you sure you want to delete this assignment?"

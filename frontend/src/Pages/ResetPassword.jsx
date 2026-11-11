@@ -1,8 +1,9 @@
 
 import { useState } from "react";
-import axios from "axios";
+import apiClient, { getApiErrorMessage } from "../api/apiClient";
+import AuthLayout from "../Components/AuthLayout";
 
-function ResetPassword({ onShowLogin }) {
+function ResetPassword({ onShowLogin, theme, toggleTheme }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -12,14 +13,17 @@ function ResetPassword({ onShowLogin }) {
   const [success, setSuccess] = useState(false);
 
   const token = window.location.pathname.split("/").pop();
-
-  if (!token || token === "reset-password") {
-  console.error("Reset password token is missing.");
-}
+  const hasToken = Boolean(token && token !== "reset-password");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setMessage("");
+
+    if (!hasToken) {
+      setMessage("This password reset link is incomplete. Request a new link.");
+      return;
+    }
 
     if (password.length < 6) {
       setMessage("Password must contain at least 6 characters.");
@@ -34,17 +38,19 @@ function ResetPassword({ onShowLogin }) {
     try {
       setLoading(true);
 
-      const response = await axios.post(
-        "http://localhost:5000/api/auth/reset-password",
-        { token, password }
-      );
+      const response = await apiClient.post("/auth/reset-password", {
+        token,
+        password,
+      });
 
       setMessage(response.data.message || "Password reset successfully!");
       setSuccess(true);
     } catch (error) {
       setMessage(
-        error.response?.data?.message ||
+        getApiErrorMessage(
+          error,
           "Unable to reset password. The link may be invalid or expired."
+        )
       );
     } finally {
       setLoading(false);
@@ -52,23 +58,25 @@ function ResetPassword({ onShowLogin }) {
   };
 
   return (
-    <div className="auth-container">
+    <AuthLayout theme={theme} toggleTheme={toggleTheme}>
       <div className="auth-card">
+        <p className="auth-form-eyebrow">ACCOUNT RECOVERY</p>
         <h2>Reset Password</h2>
-        <p>Enter your new password below.</p>
+        <p className="auth-form-subtitle">Enter your new password below.</p>
 
         {success ? (
           <>
             <p className="auth-message">{message}</p>
-            <button onClick={onShowLogin}>
+            <button type="button" onClick={onShowLogin}>
               Back to Login
             </button>
           </>
         ) : (
           <form onSubmit={handleSubmit}>
-            <label>New Password</label>
+            <label htmlFor="reset-password">New Password</label>
             <div className="password-wrapper">
               <input
+                id="reset-password"
                 type={showPassword ? "text" : "password"}
                 placeholder="Enter new password"
                 value={password}
@@ -80,14 +88,16 @@ function ResetPassword({ onShowLogin }) {
                 type="button"
                 className="password-toggle"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "Hide new password" : "Show new password"}
               >
                 {showPassword ? "🙈" : "👁"}
               </button>
             </div>
 
-            <label>Confirm New Password</label>
+            <label htmlFor="confirm-reset-password">Confirm New Password</label>
             <div className="password-wrapper">
               <input
+                id="confirm-reset-password"
                 type={showConfirmPassword ? "text" : "password"}
                 placeholder="Confirm new password"
                 value={confirmPassword}
@@ -100,12 +110,17 @@ function ResetPassword({ onShowLogin }) {
                 onClick={() =>
                   setShowConfirmPassword(!showConfirmPassword)
                 }
+                aria-label={
+                  showConfirmPassword
+                    ? "Hide confirmation password"
+                    : "Show confirmation password"
+                }
               >
                 {showConfirmPassword ? "🙈" : "👁"}
               </button>
             </div>
 
-            {message && <p className="auth-message">{message}</p>}
+            {message && <p className="auth-message" role="alert">{message}</p>}
 
             <button type="submit" disabled={loading}>
               {loading ? "Resetting..." : "Reset Password"}
@@ -113,7 +128,7 @@ function ResetPassword({ onShowLogin }) {
           </form>
         )}
       </div>
-    </div>
+    </AuthLayout>
   );
 }
 

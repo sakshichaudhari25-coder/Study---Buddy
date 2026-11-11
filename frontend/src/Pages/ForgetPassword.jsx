@@ -1,8 +1,9 @@
 
 import { useState } from "react";
-import axios from "axios";
+import apiClient, { getApiErrorMessage } from "../api/apiClient";
+import AuthLayout from "../Components/AuthLayout";
 
-function ForgotPassword({ onShowLogin }) {
+function ForgotPassword({ onShowLogin, theme, toggleTheme }) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [resetLink, setResetLink] = useState("");
@@ -10,23 +11,20 @@ function ForgotPassword({ onShowLogin }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
 
     setMessage("");
     setResetLink("");
     setLoading(true);
 
     try {
-      const response = await axios.post(
-        "http://localhost:5000/api/auth/forgot-password",
-        { email }
-      );
+      const response = await apiClient.post("/auth/forgot-password", { email });
 
       setMessage(response.data.message);
       setResetLink(response.data.resetLink || "");
     } catch (error) {
       setMessage(
-        error.response?.data?.message ||
-          "Unable to process your request."
+        getApiErrorMessage(error, "Unable to process your request.")
       );
     } finally {
       setLoading(false);
@@ -34,22 +32,24 @@ function ForgotPassword({ onShowLogin }) {
   };
 
   return (
-    <div className="auth-container">
+    <AuthLayout theme={theme} toggleTheme={toggleTheme}>
       <form className="auth-card" onSubmit={handleSubmit}>
+        <p className="auth-form-eyebrow">ACCOUNT RECOVERY</p>
         <h1>Forgot Password?</h1>
 
-        <p>
+        <p className="auth-form-subtitle">
           Enter your registered email address to generate
           a password reset link.
         </p>
 
         {message && (
-          <div className="auth-message">{message}</div>
+          <div className="auth-message" role="status">{message}</div>
         )}
 
-        <label>Email Address</label>
+        <label htmlFor="forgot-email">Email Address</label>
 
         <input
+          id="forgot-email"
           type="email"
           placeholder="Enter your registered email"
           value={email}
@@ -73,10 +73,22 @@ function ForgotPassword({ onShowLogin }) {
 
         <p>
           Remember your password?{" "}
-          <span onClick={onShowLogin}>Login</span>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={onShowLogin}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onShowLogin();
+              }
+            }}
+          >
+            Login
+          </span>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   );
 }
 

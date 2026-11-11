@@ -1,10 +1,13 @@
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 function TaskReminders({ tasks }) {
   const [permission, setPermission] = useState(
-    "Notification" in window ? Notification.permission : "unsupported"
+    typeof window !== "undefined" && "Notification" in window
+      ? Notification.permission
+      : "unsupported"
   );
+  const [message, setMessage] = useState("");
 
   // Convert date into YYYY-MM-DD format
   function getDateKey(date) {
@@ -16,7 +19,7 @@ function TaskReminders({ tasks }) {
   }
 
   // Check tasks due today or tomorrow
-  function checkReminders() {
+  const checkReminders = useCallback(() => {
     if (!("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
 
@@ -32,7 +35,7 @@ function TaskReminders({ tasks }) {
     tasks.forEach((task) => {
       if (task.completed) return;
 
-      const dueDateKey = task.dueDate.split("T")[0];
+      const dueDateKey = String(task.dueDate).split("T")[0];
 
       if (dueDateKey !== todayKey && dueDateKey !== tomorrowKey) {
         return;
@@ -48,31 +51,37 @@ function TaskReminders({ tasks }) {
           ? "This assignment is due today!"
           : "This assignment is due tomorrow!";
 
-      new Notification(task.title, {
-        body: `${message} Subject: ${task.subject}`,
-        icon: "/vite.svg",
-      });
-
-      localStorage.setItem(reminderKey, "shown");
+      try {
+        new Notification(task.title, {
+          body: `${message} Subject: ${task.subject}`,
+          icon: "/vite.svg",
+        });
+        localStorage.setItem(reminderKey, "shown");
+      } catch {
+        setMessage("A deadline notification could not be displayed.");
+      }
     });
-  }
+  }, [tasks]);
 
   // Ask browser permission
   async function enableNotifications() {
     if (!("Notification" in window)) {
-      alert("Your browser does not support notifications.");
+      setMessage("Your browser does not support notifications.");
       return;
     }
 
-    const result = await Notification.requestPermission();
+    try {
+      const result = await Notification.requestPermission();
+      setPermission(result);
 
-    setPermission(result);
-
-    if (result === "granted") {
-      alert("Notifications enabled successfully!");
-      checkReminders();
-    } else {
-      alert("Notification permission was not granted.");
+      if (result === "granted") {
+        setMessage("Notifications enabled successfully.");
+        checkReminders();
+      } else {
+        setMessage("Notification permission was not granted.");
+      }
+    } catch {
+      setMessage("Unable to request notification permission.");
     }
   }
 
@@ -85,7 +94,7 @@ function TaskReminders({ tasks }) {
     const interval = setInterval(checkReminders, 60000);
 
     return () => clearInterval(interval);
-  }, [tasks, permission]);
+  }, [checkReminders, permission]);
 
   return (
     <section className="reminder-section">
@@ -94,6 +103,7 @@ function TaskReminders({ tasks }) {
         <p>
           Get browser notifications for assignments due today or tomorrow.
         </p>
+        {message && <p role="status">{message}</p>}
       </div>
 
       {permission === "granted" ? (
@@ -101,7 +111,9 @@ function TaskReminders({ tasks }) {
           ✓ Notifications Enabled
         </span>
       ) : permission === "denied" ? (
-        <p>Notifications are blocked. Allow them in your browser settings.</p>
+        <p role="status">
+          Notifications are blocked. Allow them in your browser settings.
+        </p>
       ) : (
         <button type="button" onClick={enableNotifications}>
           Enable Notifications

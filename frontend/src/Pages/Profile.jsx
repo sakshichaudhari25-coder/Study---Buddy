@@ -1,19 +1,18 @@
-
 import { useState } from "react";
-import axios from "axios";
+import apiClient, { getApiErrorMessage } from "../api/apiClient";
 
 function Profile({ user, onProfileUpdate, onBack }) {
   const [name, setName] = useState(user.name || "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (loading) return;
 
     setMessage("");
     setError("");
@@ -39,7 +38,6 @@ function Profile({ user, onProfileUpdate, onBack }) {
     }
 
     const updateData = { name: name.trim() };
-
     if (newPassword) {
       updateData.currentPassword = currentPassword;
       updateData.newPassword = newPassword;
@@ -47,28 +45,17 @@ function Profile({ user, onProfileUpdate, onBack }) {
 
     try {
       setLoading(true);
-
-      const response = await axios.put(
-        "http://localhost:5000/api/auth/profile",
-        updateData,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
+      const response = await apiClient.put("/auth/profile", updateData, {
+        requiresAuth: true,
+      });
 
       onProfileUpdate(response.data.user);
-
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-
       setMessage("Profile updated successfully!");
-    } catch (err) {
-      setError(
-        err.response?.data?.message || "Unable to update profile"
-      );
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError, "Unable to update profile."));
     } finally {
       setLoading(false);
     }
@@ -86,7 +73,7 @@ function Profile({ user, onProfileUpdate, onBack }) {
         </button>
 
         <div className="profile-heading">
-          <div className="profile-avatar">
+          <div className="profile-avatar" aria-hidden="true">
             {user.name?.charAt(0).toUpperCase()}
           </div>
 
@@ -97,19 +84,24 @@ function Profile({ user, onProfileUpdate, onBack }) {
         <form onSubmit={handleSubmit}>
           <h2>Personal Information</h2>
 
-          <label>Full Name</label>
+          <label htmlFor="profile-name">Full Name</label>
           <input
+            id="profile-name"
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(event) => setName(event.target.value)}
             placeholder="Enter your name"
+            maxLength={80}
+            autoComplete="name"
             required
           />
 
-          <label>Email Address</label>
+          <label htmlFor="profile-email">Email Address</label>
           <input
+            id="profile-email"
             type="email"
             value={user.email}
+            autoComplete="email"
             disabled
           />
 
@@ -117,39 +109,50 @@ function Profile({ user, onProfileUpdate, onBack }) {
 
           <h2>Change Password</h2>
           <p className="profile-hint">
-            Leave these fields empty if you don't want to change your password.
+            Leave these fields empty if you don&apos;t want to change your password.
           </p>
 
-          <label>Current Password</label>
+          <label htmlFor="profile-current-password">Current Password</label>
           <input
+            id="profile-current-password"
             type="password"
             value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
+            onChange={(event) => setCurrentPassword(event.target.value)}
             placeholder="Enter current password"
+            autoComplete="current-password"
           />
 
-          <label>New Password</label>
+          <label htmlFor="profile-new-password">New Password</label>
           <input
+            id="profile-new-password"
             type="password"
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
+            onChange={(event) => setNewPassword(event.target.value)}
             placeholder="Enter new password"
+            autoComplete="new-password"
+            minLength={6}
           />
 
-          <label>Confirm New Password</label>
+          <label htmlFor="profile-confirm-password">Confirm New Password</label>
           <input
+            id="profile-confirm-password"
             type="password"
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
+            onChange={(event) => setConfirmPassword(event.target.value)}
             placeholder="Confirm new password"
+            autoComplete="new-password"
           />
 
           {message && (
-            <div className="profile-success">{message}</div>
+            <div className="profile-success" role="status">
+              {message}
+            </div>
           )}
 
           {error && (
-            <div className="profile-error">{error}</div>
+            <div className="profile-error" role="alert">
+              {error}
+            </div>
           )}
 
           <button
